@@ -1,3 +1,4 @@
+# coding=utf-8
 from PIL import Image
 import os
 import argparse
@@ -7,10 +8,12 @@ import math
 STHRESHOLD = 0.2
 VTHRESHOLD = 0.2
 HueArray = []
-HueMap = [0] * 361
+HueMap = []
+peakList = {}
 threshold = 0
 smallWall = 0
 scanMap = None
+Tmp = 0
 
 def getDataName(folder):
     dirs = os.listdir(folder)
@@ -18,7 +21,18 @@ def getDataName(folder):
         if 'png' in dir:
             getData(folder + "/" + dir, dir)
             break
-def getMultiDataName(folder):
+def getEffectData(folder):
+    for parent, dirnames, filenames in os.walk(folder):
+        for filename in filenames:
+            if ".png" in filename: 
+                imgFileName = os.path.join(parent, filename)
+                if '\\' in parent:
+                    prefix = parent.split('\\')
+                    prefix.append(filename)
+                    getData(imgFileName, "_".join(prefix[1:]))
+                else:
+                    getData(imgFileName, filename)
+def getMultiData(folder):
     dirs= os.listdir(folder)
     print(dirs)
     for dir in dirs:
@@ -52,14 +66,15 @@ def getData(imgFileName, dir):
             h = ((b - r) / delta) * 60.0 + 120.0
         elif cmax == b:
             h = ((r - g) / delta) * 60 + 240.0
-        HueMap[int(round(h))] += 1
+        HueMap[int(math.floor(h))] += 1
         HueArray.append(h)
     
-    countPeak()
+    # countPeak()
     print(imgFileName)
-
     creat_plt_for_role(dir)
 #根据阈值的区间计算法
+
+
 def countPeak(): 
     global threshold, smallWall
     threshold = len(HueArray) * 0.02
@@ -86,6 +101,170 @@ def countPeak():
                 hueRange = end - hue
                 peakArray.append((hue, hueRange))
     # print(peakArray)
+def isOverlap(i, ptr):
+    global Tmp
+    for a in peakList.keys():
+        if a == i: continue
+        elif peakList[a][1] == ptr or peakList[a][0] == ptr: 
+            Tmp = a
+            return True
+    return False
+#峰合并判断
+def canMerge(leftPeak, rightPeak, axis):
+    global smallWall, HueMap, peakList
+    #条件1
+    #计算能到的区域
+    leftptr = axis
+    leftcount = 0
+    while leftcount < peakList[leftPeak][3] * 0.1:
+        leftptr -= 1
+        if leftptr < 0:
+            leftptr = 360
+        leftcount += 1
+    rightptr = axis
+    rightcount = 0
+    while rightcount < peakList[rightPeak][3] * 0.1:
+        rightptr += 1
+        if rightptr >360:
+            rightptr = 0
+        rightcount += 1
+    #对区域内的值执行加权求和
+    leftTolerance = 1 / float(leftcount)
+    rightTolerance = 1 / float(rightcount)
+    rangeSum = HueMap[axis]
+    for i in range(max(leftcount, rightcount)):
+        if leftcount > 0:
+            tmp = axis - i if axis - i >= 0 else 360 - (axis - i) 
+            rangeSum += (HueMap[tmp] * (1 - leftTolerance*i) * 2)
+            leftcount -= 1
+        if rightcount > 0:
+            tmp = axis + i if axis + i < 360 else axis + i - 360 
+            rangeSum += (HueMap[tmp] * (1 - rightTolerance*i) * 2)
+            rightcount -= 1
+    condition1 = rangeSum / (peakList[leftPeak][2] + peakList[rightPeak][2]) > 0.9
+
+    #条件2
+    leftptr = axis
+    count = 0
+    leftsum = HueMap[leftPeak - 5:leftPeak] if leftPeak >= 5 else HueMap[:leftPeak] + HueMap[leftPeak - 5:]
+    rightsum = HueMap[rightPeak: rightPeak + 5] if rightPeak <= 355 else HueMap[rightPeak:] + HueMap[:365 - rightPeak]
+    leftsum = sum(leftsum)
+    rightsum = sum(rightsum)
+    while HueMap[axis] < leftsum * 0.2 * 0.1:
+        leftptr -= 1
+        if leftptr < 0:
+            leftptr = 360
+        count += 1
+    rightptr = axis
+    while HueMap[axis] < rightsum * 0.2 * 0.1:
+        rightptr += 1
+        if rightptr >360:
+            rightptr = 0
+        count += 1
+    condition2 = count / float(peakList[leftPeak][3] + peakList[rightPeak][3]) < 0.1
+
+    #条件3
+    condition3 = False
+    peaksums = peakList[leftPeak][2] + peakList[rightPeak][2]
+    if peaksums / float(len(HueArray)) > 0.8 :
+        condition3 = True
+
+    #条件4
+    condition4 = False
+    rangeSums = peakList[leftPeak][3] + peakList[rightPeak][3]
+    if peaksums / 360.0 > 0.5:
+        condition4 = True
+    return condition1 or condition2
+#最新的方法
+def Peakgrow():
+    global smallWall, HueMap, peakList, Tmp
+    #计算峰值
+    for i in range(len(HueMap)):
+        compareLeft = HueMap[i - 5:i] if i >= 5 else HueMap[:i] + HueMap[i - 5:]
+        compareRight = HueMap[i: i + 5] if i <= 355 else HueMap[i:] + HueMap[:365 - i]
+        if HueMap[i] > smallWall * 5 and HueMap[i] >= max(compareLeft) and HueMap[i] >= max(compareRight):
+            peakList[i] = [i, i, HueMap[i], 1, True, True] #左边界，右边界，和，区间长度, 左边是否截止，右是否截止    
+    line = 0
+    for k in peakList.keys():
+        line = max(HueMap[k], line)
+    hasSpread = True
+    while hasSpread and line > smallWall:
+        hasSpread = False
+        direction = 0  #0:左 1：右
+        i = 0
+        line = 0
+        for k,v in peakList.items():
+            if v[4] and HueMap[v[0]] > line:
+                i = k
+                line = HueMap[v[0]]
+                direction = 0
+            if v[5] and HueMap[v[1]] > line:
+                i = k
+                line = HueMap[v[1]]
+                direction = 1
+        #往左
+        if direction == 0 and peakList[i][4]:
+            cur = peakList[i][0]
+            leftPtr = cur - 1 if cur > 0 else 360
+            meanVal = HueMap[leftPtr]
+            tmp = leftPtr
+            for _ in range(4):
+                leftPtr = leftPtr - 1 if leftPtr > 0 else 360
+                meanVal += HueMap[leftPtr]
+            meanVal /= 5
+            leftPtr = tmp
+            if meanVal > smallWall:
+                if isOverlap(i, leftPtr):
+                    if canMerge(Tmp, i, leftPtr):
+                        if HueMap[i] > HueMap[Tmp]:
+                            reserve = i
+                            delete = Tmp
+                        else:
+                            reserve = Tmp
+                            delete = i
+                        peakList[reserve] = [peakList[Tmp][0], peakList[i][1], peakList[i][2] + peakList[Tmp][2], peakList[i][3] + peakList[Tmp][3], peakList[Tmp][4], peakList[i][5]]
+                        peakList.pop(delete)
+                    else:
+                        peakList[i][4] = False
+                else:
+                    peakList[i][0] = leftPtr
+                    peakList[i][2] += HueMap[leftPtr]
+                    peakList[i][3] += 1
+                hasSpread = True
+            cur = leftPtr
+        #往右
+        if direction == 1 and peakList[i][5]:
+            cur = peakList[i][1]
+            rightPtr = cur + 1 if cur < 360 else 0
+            meanVal = HueMap[rightPtr]
+            tmp = rightPtr
+            for _ in range(4):
+                rightPtr = rightPtr + 1 if rightPtr < 360 else 0
+                meanVal += HueMap[rightPtr]
+            meanVal /= 5
+            rightPtr = tmp
+            if meanVal > smallWall:
+                Tmp = 0
+                if isOverlap(i, rightPtr):
+                    if canMerge(i, Tmp, rightPtr):
+                        if HueMap[i] > HueMap[Tmp]:
+                            reserve = i
+                            delete = Tmp
+                        else:
+                            reserve = Tmp
+                            delete = i
+                        peakList[i] = [peakList[i][0], peakList[Tmp][1], peakList[i][2] + peakList[Tmp][2], peakList[i][3] + peakList[Tmp][3], peakList[i][4], peakList[Tmp][5]]
+                        peakList.pop(min(i, Tmp))
+                    else:
+                        peakList[i][5] = False
+                else:
+                    peakList[i][1] = rightPtr
+                    peakList[i][2] += HueMap[rightPtr]
+                    peakList[i][3] += 1
+                hasSpread = True
+            cur = rightPtr
+    #输出
+    print(peakList)        
 #根据峰值区间生长的区间计算法
 def getPeak():
     global smallWall
@@ -100,6 +279,7 @@ def getPeak():
     #峰值区间生长
     visited = [False] * len(HueMap)
     ranges = []
+
     for i in range(len(peaks)):
         if visited[peaks[i]]:
             continue
@@ -154,7 +334,6 @@ def Scan():
     # print(scanMap[222][:100])
 
     line = max(HueMap)
-    peakList = {}
     while line > 100:
         isGrowing = False
         start = 0
@@ -229,35 +408,37 @@ def Scan():
                     peakList[larger] = [peakList[tail][0], peakList[key][1], peakList[key][2] + peakList[tail][2], 0]
                     peakList.pop(smaller)
     print(peakList)
-
 def creat_plt_for_role(dir):
     global HueArray
-    plt.figure()
+    # plt.figure()
     #直接画直方图
-    plt.subplot(211)
+    # plt.subplot(211)
     plt.cla()
     plt.title(dir)
     plt.xlabel("Hue")
     plt.ylabel("PixelCount")
     plt.hist(HueArray, rwidth=1, bins=360, histtype='stepfilled')
+    # ax = plt.gca()
     # plt.axhline(max(HueMap) * 0.05)
     # plt.axhline(len(HueArray) * 0.005)
     # plt.axhline(len(HueArray) * 0.005 * 0.05)
 
     #画自己计算的色调-像素数量数组
-    plt.subplot(212)
-    plt.plot(HueMap)
+    # plt.subplot(212)
+    # plt.plot(HueMap)
+    plt.show()
 
     #计算峰值
     # getPeak()
-    Scan()
-
-    plt.show()
-    # plt.savefig("./role_hist/%s.png" % dir)
+    # Scan()
+    Peakgrow()
+    # plt.show()
+    # plt.savefig("./role_hist/%s" % dir)
 
 
 if __name__ == '__main__':
-    # getMultiDataName('D:/clients/resource/assets/role')
-    getDataName('D:/clients/resource/assets/role/1014')
+    # getMultiData('D:/clients/resource/assets/role')
+    getDataName('D:/clients/resource/assets/role/1013')
+    # getEffectData('D:/clients/resource/assets/effect')
     
     
