@@ -14,7 +14,7 @@ threshold = 0
 smallWall = 0
 scanMap = None
 Tmp = 0
-
+score1 = score3_1 = score3_2 = score4 = totalScore = 0
 def getDataName(folder):
     dirs = os.listdir(folder)
     for dir in dirs:
@@ -40,6 +40,7 @@ def getMultiData(folder):
 def getData(imgFileName, dir):
     global HueArray
     global HueMap
+    global smallWall, threshold
     HueMap = [0] * 361
     HueArray = []
     img = Image.open(imgFileName)
@@ -71,14 +72,14 @@ def getData(imgFileName, dir):
     
     # countPeak()
     print(imgFileName)
+    threshold = len(HueArray) * 0.02
+    smallWall = threshold * 0.05
     creat_plt_for_role(dir)
 #根据阈值的区间计算法
 
 
 def countPeak(): 
     global threshold, smallWall
-    threshold = len(HueArray) * 0.02
-    smallWall = threshold * 0.05
     peakArray = []
     state = 0
     begin, end = 0, 0
@@ -112,7 +113,8 @@ def isOverlap(i, ptr):
 #峰合并判断
 def canMerge(leftPeak, rightPeak, axis):
     global smallWall, HueMap, peakList
-    #条件1
+    global score1, score3_1, score3_2, score4, totalScore
+    # #条件1
     #计算能到的区域
     leftptr = axis
     leftcount = 0
@@ -134,76 +136,89 @@ def canMerge(leftPeak, rightPeak, axis):
     rangeSum = HueMap[axis]
     for i in range(max(leftcount, rightcount)):
         if leftcount > 0:
-            tmp = axis - i if axis - i >= 0 else 360 - (axis - i) 
+            tmp = axis - i if axis - i >= 0 else 360 + (axis - i) 
             rangeSum += (HueMap[tmp] * (1 - leftTolerance*i) * 2)
             leftcount -= 1
         if rightcount > 0:
             tmp = axis + i if axis + i < 360 else axis + i - 360 
             rangeSum += (HueMap[tmp] * (1 - rightTolerance*i) * 2)
             rightcount -= 1
-    condition1 = rangeSum / (peakList[leftPeak][2] + peakList[rightPeak][2]) > 0.9
+    score1 = rangeSum * 0.2 / (peakList[leftPeak][2] + peakList[rightPeak][2])
+    condition1 = score1 > 0.2
 
     #条件2
-    leftptr = axis
-    count = 0
-    leftsum = HueMap[leftPeak - 5:leftPeak] if leftPeak >= 5 else HueMap[:leftPeak] + HueMap[leftPeak - 5:]
-    rightsum = HueMap[rightPeak: rightPeak + 5] if rightPeak <= 355 else HueMap[rightPeak:] + HueMap[:365 - rightPeak]
-    leftsum = sum(leftsum)
-    rightsum = sum(rightsum)
-    while HueMap[axis] < leftsum * 0.2 * 0.1:
-        leftptr -= 1
-        if leftptr < 0:
-            leftptr = 360
-        count += 1
-    rightptr = axis
-    while HueMap[axis] < rightsum * 0.2 * 0.1:
-        rightptr += 1
-        if rightptr >360:
-            rightptr = 0
-        count += 1
-    condition2 = count / float(peakList[leftPeak][3] + peakList[rightPeak][3]) < 0.1
+    # leftptr = axis
+    # count = 0
+    # leftsum = HueMap[leftPeak - 5:leftPeak] if leftPeak >= 5 else HueMap[:leftPeak] + HueMap[leftPeak - 5:]
+    # rightsum = HueMap[rightPeak: rightPeak + 5] if rightPeak <= 355 else HueMap[rightPeak:] + HueMap[:365 - rightPeak]
+    # leftsum = sum(leftsum)
+    # rightsum = sum(rightsum)
+    # while HueMap[axis] < leftsum * 0.2 * 0.1:
+    #     leftptr -= 1
+    #     if leftptr < 0:
+    #         leftptr = 360
+    #     count += 1
+    # rightptr = axis
+    # while HueMap[axis] < rightsum * 0.2 * 0.1:
+    #     rightptr += 1
+    #     if rightptr >360:
+    #         rightptr = 0
+    #     count += 1
+    # condition2 = count / float(peakList[leftPeak][3] + peakList[rightPeak][3]) < 0.1
 
     #条件3
     condition3 = False
     peaksums = peakList[leftPeak][2] + peakList[rightPeak][2]
-    if peaksums / float(len(HueArray)) > 0.8 :
+    score3_1 = peaksums / float(len(HueArray))
+    score3_2 = max(peakList[leftPeak][2], peakList[rightPeak][2]) / float(peaksums)
+    if score3_1 < 0.8 or score3_2 > 0.8:
         condition3 = True
 
-    #条件4
+    # #条件4
     condition4 = False
     rangeSums = peakList[leftPeak][3] + peakList[rightPeak][3]
-    if peaksums / 360.0 > 0.5:
+    score4 = rangeSums / 360.0
+    if score4 < 0.5:
         condition4 = True
-    return condition1 or condition2
+
+
+    # totalScore = score1 - score3_1 + score3_2 * 2 - score4
+    # return totalScore > 0.2
+    return condition3
+    
 #最新的方法
 def Peakgrow():
     global smallWall, HueMap, peakList, Tmp
+    peakList = {}
     #计算峰值
     for i in range(len(HueMap)):
-        compareLeft = HueMap[i - 5:i] if i >= 5 else HueMap[:i] + HueMap[i - 5:]
-        compareRight = HueMap[i: i + 5] if i <= 355 else HueMap[i:] + HueMap[:365 - i]
-        if HueMap[i] > smallWall * 5 and HueMap[i] >= max(compareLeft) and HueMap[i] >= max(compareRight):
+        compareLeft = HueMap[i - 10:i] if i >= 10 else HueMap[:i] + HueMap[i - 10:]
+        compareRight = HueMap[i: i + 10] if i <= 350 else HueMap[i:] + HueMap[:370 - i]
+        if HueMap[i] > smallWall * 5 and HueMap[i] > max(compareLeft) and HueMap[i] == max(compareRight):
             peakList[i] = [i, i, HueMap[i], 1, True, True] #左边界，右边界，和，区间长度, 左边是否截止，右是否截止    
     line = 0
     for k in peakList.keys():
         line = max(HueMap[k], line)
     hasSpread = True
-    while hasSpread and line > smallWall:
+    while hasSpread:#and line > smallWall#:
         hasSpread = False
-        direction = 0  #0:左 1：右
+        direction = -1  #0:左 1：右
         i = 0
-        line = 0
+        line = -1
+        #检查是否有可以生长的峰
         for k,v in peakList.items():
             if v[4] and HueMap[v[0]] > line:
                 i = k
                 line = HueMap[v[0]]
                 direction = 0
+                hasSpread = True
             if v[5] and HueMap[v[1]] > line:
                 i = k
                 line = HueMap[v[1]]
                 direction = 1
+                hasSpread = True        
         #往左
-        if direction == 0 and peakList[i][4]:
+        if direction == 0:
             cur = peakList[i][0]
             leftPtr = cur - 1 if cur > 0 else 360
             meanVal = HueMap[leftPtr]
@@ -213,27 +228,28 @@ def Peakgrow():
                 meanVal += HueMap[leftPtr]
             meanVal /= 5
             leftPtr = tmp
-            if meanVal > smallWall:
-                if isOverlap(i, leftPtr):
-                    if canMerge(Tmp, i, leftPtr):
-                        if HueMap[i] > HueMap[Tmp]:
-                            reserve = i
-                            delete = Tmp
-                        else:
-                            reserve = Tmp
-                            delete = i
-                        peakList[reserve] = [peakList[Tmp][0], peakList[i][1], peakList[i][2] + peakList[Tmp][2], peakList[i][3] + peakList[Tmp][3], peakList[Tmp][4], peakList[i][5]]
-                        peakList.pop(delete)
+            if meanVal == 0:
+                peakList[i][4] = False
+                continue
+            if isOverlap(i, leftPtr):
+                if canMerge(Tmp, i, leftPtr):
+                    if HueMap[i] > HueMap[Tmp]:
+                        reserve = i
+                        delete = Tmp
                     else:
-                        peakList[i][4] = False
+                        reserve = Tmp
+                        delete = i
+                    peakList[reserve] = [peakList[Tmp][0], peakList[i][1], peakList[i][2] + peakList[Tmp][2], peakList[i][3] + peakList[Tmp][3], peakList[Tmp][4], peakList[i][5]]
+                    peakList.pop(delete)
                 else:
-                    peakList[i][0] = leftPtr
-                    peakList[i][2] += HueMap[leftPtr]
-                    peakList[i][3] += 1
-                hasSpread = True
-            cur = leftPtr
+                    peakList[i][4] = False
+                haha = None
+            else:
+                peakList[i][0] = leftPtr
+                peakList[i][2] += HueMap[leftPtr]
+                peakList[i][3] += 1
         #往右
-        if direction == 1 and peakList[i][5]:
+        if direction == 1:
             cur = peakList[i][1]
             rightPtr = cur + 1 if cur < 360 else 0
             meanVal = HueMap[rightPtr]
@@ -241,29 +257,29 @@ def Peakgrow():
             for _ in range(4):
                 rightPtr = rightPtr + 1 if rightPtr < 360 else 0
                 meanVal += HueMap[rightPtr]
-            meanVal /= 5
+            meanVal /= 5.0
             rightPtr = tmp
-            if meanVal > smallWall:
-                Tmp = 0
-                if isOverlap(i, rightPtr):
-                    if canMerge(i, Tmp, rightPtr):
-                        if HueMap[i] > HueMap[Tmp]:
-                            reserve = i
-                            delete = Tmp
-                        else:
-                            reserve = Tmp
-                            delete = i
-                        peakList[i] = [peakList[i][0], peakList[Tmp][1], peakList[i][2] + peakList[Tmp][2], peakList[i][3] + peakList[Tmp][3], peakList[i][4], peakList[Tmp][5]]
-                        peakList.pop(min(i, Tmp))
+            if meanVal == 0:
+                peakList[i][5] = False
+            Tmp = 0
+            if isOverlap(i, rightPtr):
+                if canMerge(i, Tmp, rightPtr):
+                    if HueMap[i] > HueMap[Tmp]:
+                        reserve = i
+                        delete = Tmp
                     else:
-                        peakList[i][5] = False
+                        reserve = Tmp
+                        delete = i
+                    peakList[reserve] = [peakList[i][0], peakList[Tmp][1], peakList[i][2] + peakList[Tmp][2], peakList[i][3] + peakList[Tmp][3], peakList[i][4], peakList[Tmp][5]]
+                    peakList.pop(delete)
                 else:
-                    peakList[i][1] = rightPtr
-                    peakList[i][2] += HueMap[rightPtr]
-                    peakList[i][3] += 1
-                hasSpread = True
-            cur = rightPtr
-    #输出
+                    peakList[i][5] = False
+                haha = None
+            else:
+                peakList[i][1] = rightPtr
+                peakList[i][2] += HueMap[rightPtr]
+                peakList[i][3] += 1
+    #log
     print(peakList)        
 #根据峰值区间生长的区间计算法
 def getPeak():
@@ -425,8 +441,9 @@ def creat_plt_for_role(dir):
 
     #画自己计算的色调-像素数量数组
     # plt.subplot(212)
+    # plt.cla()
     # plt.plot(HueMap)
-    plt.show()
+    # plt.show()
 
     #计算峰值
     # getPeak()
@@ -437,8 +454,8 @@ def creat_plt_for_role(dir):
 
 
 if __name__ == '__main__':
-    # getMultiData('D:/clients/resource/assets/role')
-    getDataName('D:/clients/resource/assets/role/1013')
+    getMultiData('D:/clients/resource/assets/role')
+    # getDataName('D:/clients/resource/assets/role/1014')
     # getEffectData('D:/clients/resource/assets/effect')
     
     
